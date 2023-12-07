@@ -132,10 +132,10 @@ __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 r
 
 	// Normalize quaternion to get valid rotation
 	glm::vec4 q = rot;// / glm::length(rot);
-	float x = q.x;
-	float y = q.y;
-	float z = q.z;
-	float w = q.w;
+	float x = q[0];
+	float y = q[1];
+	float z = q[2];
+	float w = q[3];
 
 	// Compute rotation matrix from quaternion
 	glm::mat3 R = glm::mat3(
@@ -417,8 +417,8 @@ renderCUDA(
 		final_T_d[pix_id] = T_d;
 		final_accum_prob_d[pix_id] = accum_prob_d;
 		n_contrib[pix_id] = last_contributor;
-		final_depth[pix_id] = D; // / accum_prob_d;
-		out_depth[pix_id] = D; // / accum_prob_d;
+		final_depth[pix_id] = (D + T_d * 15.f); // / accum_prob_d;
+		out_depth[pix_id] = (D + T_d * 15.f); // / accum_prob_d;
 		out_color[0 * H * W + pix_id] = C[0] + T * bg_color[0];
 		out_color[1 * H * W + pix_id] = C[1] + T * bg_color[1];
 		out_color[2 * H * W + pix_id] = C[2] + T * bg_color[2];

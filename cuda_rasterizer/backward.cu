@@ -299,10 +299,10 @@ __device__ void computeCov3D(int idx, const glm::vec3 scale, float mod, const gl
 {
 	// Recompute (intermediate) results for the 3D covariance computation.
 	glm::vec4 q = rot;// / glm::length(rot);
-	float x = q.x;
-	float y = q.y;
-	float z = q.z;
-	float w = q.w;
+	float x = q[0];
+	float y = q[1];
+	float z = q[2];
+	float w = q[3];
 
 	glm::mat3 R = glm::mat3(
 		1.f - 2.f * (y * y + z * z), 2.f * (x * y - w * z), 2.f * (x * z + w * y),
@@ -352,15 +352,15 @@ __device__ void computeCov3D(int idx, const glm::vec3 scale, float mod, const gl
 	dL_dMt[2] *= s.z;
 
 	// Gradients of loss w.r.t. normalized quaternion
-	glm::vec4 dL_dq;
-	dL_dq.w = 2 * z * (dL_dMt[0][1] - dL_dMt[1][0]) + 2 * y * (dL_dMt[2][0] - dL_dMt[0][2]) + 2 * x * (dL_dMt[1][2] - dL_dMt[2][1]);
-	dL_dq.x = 2 * y * (dL_dMt[1][0] + dL_dMt[0][1]) + 2 * z * (dL_dMt[2][0] + dL_dMt[0][2]) + 2 * w * (dL_dMt[1][2] - dL_dMt[2][1]) - 4 * x * (dL_dMt[2][2] + dL_dMt[1][1]);
-	dL_dq.y = 2 * x * (dL_dMt[1][0] + dL_dMt[0][1]) + 2 * w * (dL_dMt[2][0] - dL_dMt[0][2]) + 2 * z * (dL_dMt[1][2] + dL_dMt[2][1]) - 4 * y * (dL_dMt[2][2] + dL_dMt[0][0]);
-	dL_dq.z = 2 * w * (dL_dMt[0][1] - dL_dMt[1][0]) + 2 * x * (dL_dMt[2][0] + dL_dMt[0][2]) + 2 * y * (dL_dMt[1][2] + dL_dMt[2][1]) - 4 * z * (dL_dMt[1][1] + dL_dMt[0][0]);
+	glm::vec4 dL_dq;	
+	dL_dq[0] = 2 * y * (dL_dMt[1][0] + dL_dMt[0][1]) + 2 * z * (dL_dMt[2][0] + dL_dMt[0][2]) + 2 * w * (dL_dMt[1][2] - dL_dMt[2][1]) - 4 * x * (dL_dMt[2][2] + dL_dMt[1][1]);
+	dL_dq[1] = 2 * x * (dL_dMt[1][0] + dL_dMt[0][1]) + 2 * w * (dL_dMt[2][0] - dL_dMt[0][2]) + 2 * z * (dL_dMt[1][2] + dL_dMt[2][1]) - 4 * y * (dL_dMt[2][2] + dL_dMt[0][0]);
+	dL_dq[2] = 2 * w * (dL_dMt[0][1] - dL_dMt[1][0]) + 2 * x * (dL_dMt[2][0] + dL_dMt[0][2]) + 2 * y * (dL_dMt[1][2] + dL_dMt[2][1]) - 4 * z * (dL_dMt[1][1] + dL_dMt[0][0]);
+	dL_dq[3] = 2 * z * (dL_dMt[0][1] - dL_dMt[1][0]) + 2 * y * (dL_dMt[2][0] - dL_dMt[0][2]) + 2 * x * (dL_dMt[1][2] - dL_dMt[2][1]);
 
 	// Gradients of loss w.r.t. unnormalized quaternion
 	float4* dL_drot = (float4*)(dL_drots + idx);
-	*dL_drot = float4{ dL_dq.x, dL_dq.y, dL_dq.z, dL_dq.w };//dnormvdv(float4{ rot.x, rot.y, rot.z, rot.w }, float4{ dL_dq.x, dL_dq.y, dL_dq.z, dL_dq.w });
+	*dL_drot = float4{ dL_dq[0], dL_dq[1], dL_dq[2], dL_dq[3] };//dnormvdv(float4{ rot.x, rot.y, rot.z, rot.w }, float4{ dL_dq.x, dL_dq.y, dL_dq.z, dL_dq.w });
 }
 
 // Backward pass of the preprocessing steps, except
@@ -401,9 +401,10 @@ __global__ void preprocessCUDA(
 	
 	// in forward, depth is obtained as:
 	// z = matrix[2] * p.x + matrix[6] * p.y + matrix[10] * p.z + matrix[14],
-	dL_dmeans[idx].x += dL_ddepth[idx] * view_matrix[2];
-	dL_dmeans[idx].y += dL_ddepth[idx] * view_matrix[6];
-	dL_dmeans[idx].z += dL_ddepth[idx] * view_matrix[10];
+	float mul = view_matrix[2] * m.x + view_matrix[6] * m.y + view_matrix[10] * m.z + view_matrix[14];
+	dL_dmeans[idx].x += dL_ddepth[idx] * (view_matrix[2] - view_matrix[3] * mul);
+	dL_dmeans[idx].y += dL_ddepth[idx] * (view_matrix[6] - view_matrix[7] * mul);
+	dL_dmeans[idx].z += dL_ddepth[idx] * (view_matrix[10]- view_matrix[11]* mul);
 
 	// Compute loss gradient w.r.t. 3D means due to gradients of 2D means
 	// from rendering procedure
@@ -598,7 +599,9 @@ renderCUDA(
 			float covzx = con_o.i;
 			float covyz = con_o.j;
 			const float dL_dchanneld = dL_dpixel_depth;
-			const float depth = collected_depths[j] - (covzx*con_o.x + covyz*con_o.y)*d.x - (covzx*con_o.y + covyz*con_o.z)*d.y;			
+			const float depth = collected_depths[j] - (covzx*con_o.x + covyz*con_o.y)*d.x - (covzx*con_o.y + covyz*con_o.z)*d.y;
+			const float dchanneld_ddepth = alpha_d * T_d; // / accum_prob_d;
+			atomicAdd(&(dL_ddepths[global_id]), dchanneld_ddepth * dL_dchanneld);
 			
 			const float dchanneld_dcovzx = (- con_o.x * d.x - con_o.y * d.y) * alpha_d * T_d; // / accum_prob_d;
 			const float dchanneld_dcovyz = (- con_o.y * d.x) * alpha_d * T_d; // / accum_prob_d;
@@ -606,9 +609,7 @@ renderCUDA(
 			const float dchanneld_dconoy = (- covyz * d.x - covzx * d.y) * alpha_d * T_d; // / accum_prob_d;
 			const float dchanneld_dconoz = (- covyz * d.y) * alpha_d * T_d; // / accum_prob_d;
 			const float dchanneld_ddelx = - (covzx*con_o.x + covyz*con_o.y) * alpha_d * T_d; // / accum_prob_d;
-			const float dchanneld_ddely = - (covzx*con_o.y + covyz*con_o.z) * alpha_d * T_d; // / accum_prob_d;
-			const float dchanneld_ddepth = alpha_d * T_d; // / accum_prob_d;
-			atomicAdd(&(dL_ddepths[global_id]), dchanneld_ddepth * dL_dchanneld);						
+			const float dchanneld_ddely = - (covzx*con_o.y + covyz*con_o.z) * alpha_d * T_d; // / accum_prob_d;							
  			
 			// const float depth = collected_depths[j];
 			// update last depth
@@ -621,7 +622,7 @@ renderCUDA(
 			float dL_dalpha_d = dL_dchanneld * dchanneld_dalpha_d;
 			
 			float bg_dot_ddepth = 0.f;
-			bg_dot_ddepth = 0.f * dL_dpixel_depth;
+			bg_dot_ddepth = 15.f * dL_dpixel_depth;
 			dL_dalpha_d += (-T_final_d / (1.f - alpha_d)) * bg_dot_ddepth;
 
 
